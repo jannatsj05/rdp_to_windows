@@ -1,4 +1,4 @@
-name: RDP_with_LocalXpose_ReservedEndpoint
+name: RDP_with_LocalXpose_Fixed_CLI
 
 on:
   workflow_dispatch:
@@ -57,30 +57,19 @@ jobs:
               Write-Warning "No saved session found. Please login once manually via GUI to save session."
           }
 
-      - name: Reserve endpoint (if not already)
+      - name: Reserve endpoint (port 4455, region US)
         shell: powershell
         run: |
-          # Set a fixed endpoint for RDP
-          $reservedEndpoint = "us.loclx.io:4455"  # change region/port as needed
-          
-          # Reserve if not already
-          $check = & .\loclx.exe endpoint list 2>&1 | Select-String -Pattern $reservedEndpoint
-          if (-not $check) {
-              Write-Host "Reserving endpoint $reservedEndpoint..."
-              & .\loclx.exe endpoint reserve --reserved-endpoint $reservedEndpoint
-          } else {
-              Write-Host "Endpoint $reservedEndpoint already reserved."
-          }
+          & .\loclx.exe endpoint reserve --port 4455 --region us
 
-      - name: Start LocalXpose Tunnel (TCP 3389 with reserved endpoint)
+      - name: Start LocalXpose Tunnel (TCP 3389)
         shell: powershell
         run: |
-          $reservedEndpoint = "us.loclx.io:4455"
-          $arg = "tunnel tcp --reserved-endpoint $reservedEndpoint --to 127.0.0.1:3389"
+          $arg = "tunnel tcp --to 127.0.0.1:3389 --port 4455"
           $proc = Start-Process -FilePath ".\loclx.exe" -ArgumentList $arg -WindowStyle Hidden -PassThru
           Start-Sleep -Seconds 6
 
-          Write-Host "Public RDP address: $reservedEndpoint"
+          Write-Host "Public RDP address: us.loclx.io:4455"
           Write-Host "LocalXpose process id: $($proc.Id)"
 
       - name: Keep session alive
