@@ -33,7 +33,6 @@ jobs:
           LOCLX_TOKEN: ${{ secrets.LOCLX_TOKEN }}
         run: |
           echo %LOCLX_TOKEN% | loclx.exe account login
-          REM verify login
           loclx.exe account status
 
       - name: Start LocalXpose Tunnel (TCP 3389)
