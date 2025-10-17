@@ -19,22 +19,26 @@ jobs:
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
           Set-LocalUser -Name "runneradmin" -Password (ConvertTo-SecureString -AsPlainText "P@ssw0rd!" -Force)
 
-      # ✅ Download loclx.exe directly (no npm)
-      - name: Download LocalXpose CLI
+      # ✅ Download from official GitHub Releases
+      - name: Download LocalXpose CLI (latest)
         shell: powershell
         run: |
-          Invoke-WebRequest -Uri "https://localxpose.io/cli/windows_amd64.zip" -OutFile "loclx.zip"
+          $url = "https://github.com/localxpose/cli/releases/latest/download/loclx-windows-amd64.zip"
+          Write-Host "Downloading LocalXpose from $url ..."
+          Invoke-WebRequest -Uri $url -OutFile "loclx.zip"
           Expand-Archive loclx.zip -DestinationPath .
-          dir .
+          Rename-Item ".\loclx-windows-amd64.exe" "loclx.exe"
+          Write-Host "Download complete. Checking version..."
+          .\loclx.exe --version
 
-      # ✅ Login using your token (use secrets for safety)
-      - name: Login LocalXpose
+      # ✅ Login with your LocalXpose token (GitHub secret)
+      - name: Login to LocalXpose
         shell: powershell
         env:
           LOCLX_TOKEN: ${{ secrets.LOCLX_TOKEN }}
         run: |
           if (-not $Env:LOCLX_TOKEN) {
-            Write-Error "LOCLX_TOKEN secret missing! Add it in GitHub -> Settings -> Secrets -> Actions"
+            Write-Error "LOCLX_TOKEN secret missing! Add it in GitHub → Settings → Secrets → Actions"
             exit 1
           }
           .\loclx.exe account login $Env:LOCLX_TOKEN
@@ -43,9 +47,10 @@ jobs:
       - name: Start LocalXpose TCP tunnel
         shell: powershell
         run: |
+          Write-Host "Starting LocalXpose TCP tunnel..."
           Start-Process -FilePath ".\loclx.exe" -ArgumentList "tunnel tcp --to 3389" -NoNewWindow
-          Start-Sleep -Seconds 5
-          Write-Host "Tunnel started successfully!"
+          Start-Sleep -Seconds 6
+          Write-Host "Tunnel started. Check log for endpoint info."
 
       - name: Run upload.bat
         shell: cmd
