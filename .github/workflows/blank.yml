@@ -21,32 +21,30 @@ jobs:
           $Username = "runneradmin"
 
           # Generate a robust random password (12 chars: letters, digits, symbols)
-          # Combine numeric and letter and symbol ranges into one array properly
           $chars = @(48..57 + 65..90 + 97..122 + 33..47 + 58..64 + 91..96)
-
           $pwChars = for ($i = 0; $i -lt 12; $i++) { [char]($chars | Get-Random) }
           $PlainPassword = -join $pwChars
 
-          Write-Host "🔐 Generated password for local user (will be printed below):"
+          Write-Host "Generated password for local user (will be printed below):"
 
-          # Create or update local user with the generated password
+          # Create or update local user
           try {
             if (-not (Get-LocalUser -Name $Username -ErrorAction SilentlyContinue)) {
               New-LocalUser -Name $Username -Password (ConvertTo-SecureString $PlainPassword -AsPlainText -Force) -PasswordNeverExpires $true -Description "RDP user for workflow"
-              Write-Host "✅ Local user '$Username' created."
+              Write-Host "Local user $Username created."
             } else {
               Set-LocalUser -Name $Username -Password (ConvertTo-SecureString $PlainPassword -AsPlainText -Force)
-              Write-Host "🔁 Local user '$Username' already existed — password updated."
+              Write-Host "Local user $Username already existed — password updated."
             }
           } catch {
             Write-Error "Failed to create/update local user: $_"
             exit 1
           }
 
-          # Add user to Remote Desktop Users group and Administrators if desired
+          # Add user to Remote Desktop Users group
           try {
             Add-LocalGroupMember -Group "Remote Desktop Users" -Member $Username -ErrorAction SilentlyContinue
-            Write-Host "✅ Added '$Username' to Remote Desktop Users group."
+            Write-Host "Added $Username to Remote Desktop Users group."
           } catch {
             Write-Warning "Could not add to Remote Desktop Users: $_"
           }
@@ -63,7 +61,7 @@ jobs:
           try {
             Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" -Name "fDenyTSConnections" -Value 0
             Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
-            Write-Host "✅ RDP enabled and firewall configured."
+            Write-Host "RDP enabled and firewall configured."
           } catch {
             Write-Error "Failed to enable RDP or firewall: $_"
             exit 1
@@ -80,7 +78,7 @@ jobs:
         run: |
           Invoke-WebRequest -Uri "https://api.localxpose.io/api/downloads/loclx-windows-amd64.zip" -OutFile "loclx.zip" -UseBasicParsing
           Expand-Archive -Path "loclx.zip" -DestinationPath "." -Force
-          Write-Host "✅ LocalXpose (loclx.exe) extracted successfully."
+          Write-Host "LocalXpose (loclx.exe) extracted successfully."
 
       - name: Login to LocalXpose (non-interactive)
         shell: powershell
@@ -96,7 +94,7 @@ jobs:
             Write-Error "loclx login failed with exit code $LASTEXITCODE"
             exit $LASTEXITCODE
           }
-          Write-Host "✅ Logged in to LocalXpose."
+          Write-Host "Logged in to LocalXpose."
           & .\loclx.exe account status
 
       - name: Start LocalXpose Tunnel (TCP 3389) and show public address
@@ -104,7 +102,7 @@ jobs:
         run: |
           $rand = Get-Random -Minimum 1000 -Maximum 999999
           $sub = "myrdp$rand"
-          Write-Host "🚀 Starting tunnel for RDP (TCP 3389) with subdomain: $sub ..."
+          Write-Host "Starting tunnel for RDP (TCP 3389) with subdomain: $sub ..."
 
           $arg = "tunnel tcp --to 3389 --subdomain $sub"
           $proc = Start-Process -FilePath ".\loclx.exe" -ArgumentList $arg -WindowStyle Hidden -PassThru
@@ -136,8 +134,8 @@ jobs:
             Write-Warning "Could not parse exact public address from 'loclx tunnel list'. Falling back to: $rdpUrl"
           }
 
-          Write-Host "🌐 Public RDP address: $rdpUrl"
-          Write-Host "🔁 LocalXpose process id: $($proc.Id)"
+          Write-Host "Public RDP address: $rdpUrl"
+          Write-Host "LocalXpose process id: $($proc.Id)"
 
       - name: Keep session alive
         shell: cmd
