@@ -54,7 +54,7 @@ jobs:
           # (Optional) Add to Administrators — comment out if you don't want admin rights
           try {
             Add-LocalGroupMember -Group "Administrators" -Member $Username -ErrorAction SilentlyContinue
-            Write-Host "⚠️ Added '$Username' to Administrators (optional)."
+            Write-Host "Added $Username to Administrators (optional)."
           } catch {
             Write-Warning "Could not add to Administrators: $_"
           }
