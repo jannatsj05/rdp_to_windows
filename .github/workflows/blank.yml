@@ -1,4 +1,4 @@
-name: RDP_with_LocalXpose
+name: RDP_with_LocalXpose_Fixed
 
 on:
   workflow_dispatch:
@@ -23,24 +23,24 @@ jobs:
       - name: Download LocalXpose CLI
         shell: powershell
         run: |
-          Invoke-WebRequest -Uri "https://api.localxpose.io/api/downloads/loclx-windows-amd64.zip" -OutFile "loclx.exe"
-          Expand-Archive loclx-windows-amd64.zip -DestinationPath .
-          Rename-Item ".\loclx.exe" "loclx.exe" -Force
-          Write-Host "✅ LocalXpose downloaded successfully."
+          Invoke-WebRequest -Uri "https://api.localxpose.io/api/downloads/loclx-windows-amd64.zip" -OutFile "loclx.zip"
+          Expand-Archive -Path "loclx.zip" -DestinationPath "." -Force
+          Write-Host "✅ LocalXpose (loclx.exe) extracted successfully."
 
       - name: Login to LocalXpose
         shell: powershell
         env:
-          LOCXLX_TOKEN: ${{ secrets.LOCLX_TOKEN }}
+          LOCLX_TOKEN: ${{ secrets.LOCLX_TOKEN }}
         run: |
-          .\loclx.exe account login --token $Env:LOCXLX_TOKEN
+          .\loclx.exe account login --token $Env:LOCLX_TOKEN
           Write-Host "✅ Logged in to LocalXpose successfully."
 
       - name: Start LocalXpose Tunnel (TCP 3389)
         shell: powershell
         run: |
+          Write-Host "🚀 Starting tunnel for RDP (TCP 3389)..."
           Start-Process -FilePath ".\loclx.exe" -ArgumentList "tunnel tcp --to 3389" -NoNewWindow
-          Write-Host "🚀 Tunnel started. You’ll get your public TCP address below."
+          Write-Host "🌐 Tunnel started. You can view the public address in the next step."
 
       - name: Keep session alive
         shell: cmd
