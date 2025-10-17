@@ -32,7 +32,7 @@ jobs:
         env:
           LOCLX_TOKEN: ${{ secrets.LOCLX_TOKEN }}
         run: |
-          .\loclx.exe account login --token $Env:LOCLX_TOKEN
+          .\loclx.exe account login --token $Env:LOCLX_ACCOUNT_LOGIN
           Write-Host "✅ Logged in to LocalXpose successfully."
 
       - name: Start LocalXpose Tunnel (TCP 3389)
