@@ -27,13 +27,14 @@ jobs:
           Expand-Archive -Path "loclx.zip" -DestinationPath "." -Force
           Write-Host "✅ LocalXpose (loclx.exe) extracted successfully."
 
-      - name: Login to LocalXpose
-        shell: powershell
+      - name: Login to LocalXpose (non-interactive)
+        shell: cmd
         env:
           LOCLX_TOKEN: ${{ secrets.LOCLX_TOKEN }}
         run: |
-          .\loclx.exe account login --token $Env:LOCLX_ACCOUNT_LOGIN
-          Write-Host "✅ Logged in to LocalXpose successfully."
+          echo %LOCLX_TOKEN% | loclx.exe account login
+          REM verify login
+          loclx.exe account status
 
       - name: Start LocalXpose Tunnel (TCP 3389)
         shell: powershell
