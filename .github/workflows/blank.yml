@@ -51,7 +51,7 @@ jobs:
             Write-Warning "Could not add to Remote Desktop Users: $_"
           }
 
-          # (Optional) Add to Administrators — comment out if you don't want admin rights
+          # Optional: Add to Administrators - comment out if you don't want admin rights
           try {
             Add-LocalGroupMember -Group "Administrators" -Member $Username -ErrorAction SilentlyContinue
             Write-Host "Added $Username to Administrators (optional)."
