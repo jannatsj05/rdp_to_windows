@@ -8,7 +8,7 @@ jobs:
     runs-on: windows-2022
     timeout-minutes: 9999
     steps:
-      - name: Deploy rdp_to_windows
+      - name: Checkout repo
         uses: actions/checkout@v3
         with:
           fetch-depth: 1
@@ -25,6 +25,7 @@ jobs:
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1
           Set-LocalUser -Name "runneradmin" -Password (ConvertTo-SecureString -AsPlainText "P@ssw0rd!" -Force)
 
+      # (তোমার অন্যান্য registry/customization steps এখানে রেখে দাও — পরিবর্তন করিনি)
       - name: Change Theme to Dark
         shell: cmd
         run: |
@@ -35,49 +36,103 @@ jobs:
         shell: cmd
         run: Reg Add "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v HideFileExt /t REG_DWORD /d 0 /f
 
-      - name: 关闭“透明效果”。
+      - name: 关闭“透明效果”
         shell: cmd
         run: Reg Add "HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize" /v EnableTransparency /t REG_DWORD /d 0 /f
 
-      - name: 隐藏开始菜单栏的“搜索框”。
+      - name: 隐藏开始菜单栏的“搜索框”
         shell: cmd
         run: Reg Add "HKCU\Software\Microsoft\Windows\CurrentVersion\Search" /v SearchboxTaskbarMode /t REG_DWORD /d 0 /f
 
-      - name: 启用任务栏上的小图标。
+      - name: 启用任务栏上的小图标
         shell: cmd
         run: Reg Add "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v TaskbarSmallIcons /t REG_DWORD /d 1 /f
 
-      - name: 禁用任务栏上的 taskview 按钮。
+      - name: 禁用任务栏上的 taskview 按钮
         shell: cmd
         run: Reg Add "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v ShowTaskViewButton /t REG_DWORD /d 0 /f
 
-      - name: 重启 explorer 进程。
+      - name: 重启 explorer 进程
         shell: powershell
         run: |
           TASKKILL /F /IM explorer.exe /T
-          SLEEP 5
-          explorer.exe
-          SLEEP 3
+          Start-Sleep -Seconds 5
+          Start-Process explorer.exe
+          Start-Sleep -Seconds 3
 
-      - name: Authorize ngrok
+      ## -------------------------
+      ## Install Node & LocalXpose
+      ## -------------------------
+      - name: Install Node.js (LTS) via Chocolatey
+        shell: powershell
+        run: |
+          choco install nodejs-lts -y
+          node -v
+          npm -v
+
+      - name: Install LocalXpose CLI (loclx) globally
+        shell: powershell
+        run: |
+          npm install -g loclx
+          loclx --version
+
+      ## -------------------------
+      ## Login/authenticate loclx
+      ## -------------------------
+      - name: Login to LocalXpose via access token (non-interactive)
         shell: powershell
         env:
-          NGROK_AUTH_TOKEN: ${{ secrets.NGROK_AUTH_TOKEN }}
-        run: .\ngrok.exe authtoken $Env:NGROK_AUTH_TOKEN
+          LX_ACCESS_TOKEN: ${{ secrets.LOCLX_TOKEN }}
+        run: |
+          if (-not $Env:LX_ACCESS_TOKEN) {
+            Write-Error "LOCLX_TOKEN is not set in repository secrets. Add it to Settings -> Secrets -> Actions"
+            exit 1
+          }
+          # Store token in LX_ACCESS_TOKEN env var for this session (CLI reads it)
+          $env:LX_ACCESS_TOKEN = $Env:LX_ACCESS_TOKEN
+          # You can confirm account status (non-fatal) — optional
+          loclx account status || Write-Host "Could not get account status (not fatal)."
+
+      ## -------------------------
+      ## Start TCP tunnel in background and capture endpoint
+      ## -------------------------
+      - name: Start LocalXpose TCP tunnel (background) and save logs
+        shell: powershell
+        env:
+          LX_ACCESS_TOKEN: ${{ secrets.LOCLX_TOKEN }}
+        run: |
+          # Run loclx tcp tunnel for local RDP (localhost:3389). Output redirected to logfile.
+          $log = "loclx_tunnel.log"
+          Write-Host "Starting LocalXpose TCP tunnel and writing logs to $log ..."
+          # Start in background (Start-Process) and redirect stdout/stderr to file
+          Start-Process -FilePath "loclx" -ArgumentList "tunnel tcp --port 0 --to 127.0.0.1:3389" -NoNewWindow -RedirectStandardOutput $log -RedirectStandardError $log
+          # wait a bit for tunnel to create
+          Start-Sleep -Seconds 6
+          Write-Host "Waiting extra seconds for endpoint to be assigned..."
+          Start-Sleep -Seconds 4
+          if (Test-Path $log) {
+            Write-Host "==== loclx log (last 200 lines) ===="
+            Get-Content $log -Tail 200 | ForEach-Object { Write-Host $_ }
+            Write-Host "===================================="
+            # Try to extract endpoint like "us.loclx.io:12345"
+            $text = Get-Content $log -Raw
+            $m = [regex]::Match($text, "[a-z0-9\-]+\.loclx\.io:\d{2,6}")
+            if ($m.Success) {
+              Write-Host "FOUND PUBLIC ENDPOINT: $($m.Value)"
+              # expose as job summary for easy copy
+              Write-Host "::notice title=LocalXpose endpoint::$($m.Value)"
+            } else {
+              Write-Host "Could not parse endpoint from log yet. Check full logs above or run 'loclx tunnel tcp --help' locally to verify behavior."
+            }
+          } else {
+            Write-Host "Log file not found; loclx may not have started correctly."
+            Get-Process -Name loclx -ErrorAction SilentlyContinue | Format-Table -AutoSize
+          }
 
       - name: Deploy upload.bat
         shell: pwsh
         run: echo '${{ secrets.UPLOAD }}' > ./upload.bat
 
-      # - name: Run ngrok in the background to create tunnel with tcp port 3
-        # shell: powershell
-        # run: Start-Process -FilePath ".\ngrok.exe" -ArgumentList "tcp 3389"
-
-      - name: Run ngrok
-        shell: cmd
-        run: ngrok.exe tcp 3389
-
       - name: Run upload.bat
         shell: cmd
         run: upload.bat
-
