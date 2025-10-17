@@ -1,4 +1,4 @@
-name: RDP_with_LocalXpose_Fixed_With_Creds
+name: RDP_with_LocalXpose_Fixed_Clean
 
 on:
   workflow_dispatch:
@@ -12,62 +12,62 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Prepare RDP user, enable RDP & firewall (generate password)
+      - name: Prepare RDP user, enable RDP & firewall
         shell: powershell
         env:
           LOCLX_TOKEN: ${{ secrets.LOCLX_TOKEN }}
         run: |
-          # --- CONFIG ---
+          # Configuration
           $Username = "runneradmin"
 
-          # Generate a robust random password (12 chars: letters, digits, symbols)
+          # Generate a random password
           $chars = @(48..57 + 65..90 + 97..122 + 33..47 + 58..64 + 91..96)
           $pwChars = for ($i = 0; $i -lt 12; $i++) { [char]($chars | Get-Random) }
           $PlainPassword = -join $pwChars
 
-          Write-Host "Generated password for local user (will be printed below):"
+          Write-Host "Generated password for local user:"
 
           # Create or update local user
           try {
-            if (-not (Get-LocalUser -Name $Username -ErrorAction SilentlyContinue)) {
-              New-LocalUser -Name $Username -Password (ConvertTo-SecureString $PlainPassword -AsPlainText -Force) -PasswordNeverExpires $true -Description "RDP user for workflow"
-              Write-Host "Local user $Username created."
-            } else {
-              Set-LocalUser -Name $Username -Password (ConvertTo-SecureString $PlainPassword -AsPlainText -Force)
-              Write-Host "Local user $Username already existed — password updated."
-            }
+              if (-not (Get-LocalUser -Name $Username -ErrorAction SilentlyContinue)) {
+                  New-LocalUser -Name $Username -Password (ConvertTo-SecureString $PlainPassword -AsPlainText -Force) -PasswordNeverExpires $true -Description "RDP user for workflow"
+                  Write-Host "Local user $Username created."
+              } else {
+                  Set-LocalUser -Name $Username -Password (ConvertTo-SecureString $PlainPassword -AsPlainText -Force)
+                  Write-Host "Local user $Username already existed - password updated."
+              }
           } catch {
-            Write-Error "Failed to create/update local user: $_"
-            exit 1
+              Write-Error "Failed to create/update local user: $_"
+              exit 1
           }
 
           # Add user to Remote Desktop Users group
           try {
-            Add-LocalGroupMember -Group "Remote Desktop Users" -Member $Username -ErrorAction SilentlyContinue
-            Write-Host "Added $Username to Remote Desktop Users group."
+              Add-LocalGroupMember -Group "Remote Desktop Users" -Member $Username -ErrorAction SilentlyContinue
+              Write-Host "Added $Username to Remote Desktop Users group."
           } catch {
-            Write-Warning "Could not add to Remote Desktop Users: $_"
+              Write-Warning "Could not add to Remote Desktop Users: $_"
           }
 
-          # Optional: Add to Administrators - comment out if you don't want admin rights
+          # Optional: Add to Administrators
           try {
-            Add-LocalGroupMember -Group "Administrators" -Member $Username -ErrorAction SilentlyContinue
-            Write-Host "Added $Username to Administrators (optional)."
+              Add-LocalGroupMember -Group "Administrators" -Member $Username -ErrorAction SilentlyContinue
+              Write-Host "Added $Username to Administrators (optional)."
           } catch {
-            Write-Warning "Could not add to Administrators: $_"
+              Write-Warning "Could not add to Administrators: $_"
           }
 
-          # Enable RDP and firewall rule
+          # Enable RDP and firewall
           try {
-            Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" -Name "fDenyTSConnections" -Value 0
-            Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
-            Write-Host "RDP enabled and firewall configured."
+              Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" -Name "fDenyTSConnections" -Value 0
+              Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+              Write-Host "RDP enabled and firewall configured."
           } catch {
-            Write-Error "Failed to enable RDP or firewall: $_"
-            exit 1
+              Write-Error "Failed to enable RDP or firewall: $_"
+              exit 1
           }
 
-          # Print credentials (visible in Actions log)
+          # Print credentials
           Write-Host "----- RDP CREDENTIALS -----"
           Write-Host "Username: $Username"
           Write-Host "Password: $PlainPassword"
@@ -78,31 +78,31 @@ jobs:
         run: |
           Invoke-WebRequest -Uri "https://api.localxpose.io/api/downloads/loclx-windows-amd64.zip" -OutFile "loclx.zip" -UseBasicParsing
           Expand-Archive -Path "loclx.zip" -DestinationPath "." -Force
-          Write-Host "LocalXpose (loclx.exe) extracted successfully."
+          Write-Host "LocalXpose extracted successfully."
 
-      - name: Login to LocalXpose (non-interactive)
+      - name: Login to LocalXpose
         shell: powershell
         env:
           LOCLX_TOKEN: ${{ secrets.LOCLX_TOKEN }}
         run: |
           if (-not $Env:LOCLX_TOKEN -or $Env:LOCLX_TOKEN.Trim() -eq "") {
-            Write-Error "LOCLX_TOKEN is empty. Add it to repository secrets."
-            exit 1
+              Write-Error "LOCLX_TOKEN is empty. Add it to repository secrets."
+              exit 1
           }
           & .\loclx.exe account login --token $Env:LOCLX_TOKEN
           if ($LASTEXITCODE -ne 0) {
-            Write-Error "loclx login failed with exit code $LASTEXITCODE"
-            exit $LASTEXITCODE
+              Write-Error "loclx login failed with exit code $LASTEXITCODE"
+              exit $LASTEXITCODE
           }
           Write-Host "Logged in to LocalXpose."
           & .\loclx.exe account status
 
-      - name: Start LocalXpose Tunnel (TCP 3389) and show public address
+      - name: Start LocalXpose Tunnel (TCP 3389)
         shell: powershell
         run: |
           $rand = Get-Random -Minimum 1000 -Maximum 999999
           $sub = "myrdp$rand"
-          Write-Host "Starting tunnel for RDP (TCP 3389) with subdomain: $sub ..."
+          Write-Host "Starting tunnel for RDP (TCP 3389) with subdomain: $sub"
 
           $arg = "tunnel tcp --to 3389 --subdomain $sub"
           $proc = Start-Process -FilePath ".\loclx.exe" -ArgumentList $arg -WindowStyle Hidden -PassThru
@@ -111,27 +111,27 @@ jobs:
 
           $rdpUrl = $null
           for ($i=0; $i -lt 6 -and -not $rdpUrl; $i++) {
-            Start-Sleep -Seconds (3 * $i + 1)
-            try {
-              $output = & .\loclx.exe tunnel list 2>&1
-            } catch {
-              $output = $_.Exception.Message
-            }
-            $line = $output | Where-Object { $_ -match "tcp://" -or ($_ -match "tcp" -and $_ -match "3389") } | Select-Object -First 1
-            if ($line) {
-              if ($line -match "(tcp://\S+)") {
-                $rdpUrl = $Matches[1]
-              } elseif ($line -match "(\S+:\d{1,5})") {
-                $rdpUrl = $Matches[1]
-              } else {
-                $rdpUrl = $line.Trim()
+              Start-Sleep -Seconds (3 * $i + 1)
+              try {
+                  $output = & .\loclx.exe tunnel list 2>&1
+              } catch {
+                  $output = $_.Exception.Message
               }
-            }
+              $line = $output | Where-Object { $_ -match "tcp://" -or ($_ -match "tcp" -and $_ -match "3389") } | Select-Object -First 1
+              if ($line) {
+                  if ($line -match "(tcp://\S+)") {
+                      $rdpUrl = $Matches[1]
+                  } elseif ($line -match "(\S+:\d{1,5})") {
+                      $rdpUrl = $Matches[1]
+                  } else {
+                      $rdpUrl = $line.Trim()
+                  }
+              }
           }
 
           if (-not $rdpUrl) {
-            $rdpUrl = "tcp://$sub.localxpose.io:3389"
-            Write-Warning "Could not parse exact public address from 'loclx tunnel list'. Falling back to: $rdpUrl"
+              $rdpUrl = "tcp://$sub.localxpose.io:3389"
+              Write-Warning "Could not parse exact public address, using fallback: $rdpUrl"
           }
 
           Write-Host "Public RDP address: $rdpUrl"
