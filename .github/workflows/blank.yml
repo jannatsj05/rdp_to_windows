@@ -24,8 +24,8 @@ jobs:
         shell: powershell
         run: |
           Invoke-WebRequest -Uri "https://api.localxpose.io/api/downloads/loclx-windows-amd64.zip" -OutFile "loclx.zip"
-          Expand-Archive loclx.zip -DestinationPath .
-          Rename-Item ".\loclx-windows-amd64.exe" "loclx.exe" -Force
+          Expand-Archive loclx-windows-amd64.zip -DestinationPath .
+          Rename-Item ".\loclx.exe" "loclx.exe" -Force
           Write-Host "✅ LocalXpose downloaded successfully."
 
       - name: Login to LocalXpose
