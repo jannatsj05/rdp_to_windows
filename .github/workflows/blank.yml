@@ -15,23 +15,18 @@ jobs:
       - name: Prepare RDP user, enable RDP & firewall (generate password)
         shell: powershell
         env:
-          # keep token only for later steps, not used here
           LOCLX_TOKEN: ${{ secrets.LOCLX_TOKEN }}
         run: |
           # --- CONFIG ---
           $Username = "runneradmin"
 
           # Generate a robust random password (12 chars: letters, digits, symbols)
-          $chars = (@()
-            + (48..57)    # 0-9
-            + (65..90)    # A-Z
-            + (97..122)   # a-z
-            + (33..47)    # symbols
-            + (58..64)
-            + (91..96)
-          )
-          $pwChars = for ($i=0; $i -lt 12; $i++) { [char]($chars | Get-Random) }
-          $PlainPassword = ($pwChars -join "")
+          # Combine numeric and letter and symbol ranges into one array properly
+          $chars = @(48..57 + 65..90 + 97..122 + 33..47 + 58..64 + 91..96)
+
+          $pwChars = for ($i = 0; $i -lt 12; $i++) { [char]($chars | Get-Random) }
+          $PlainPassword = -join $pwChars
+
           Write-Host "🔐 Generated password for local user (will be printed below):"
 
           # Create or update local user with the generated password
@@ -50,10 +45,6 @@ jobs:
 
           # Add user to Remote Desktop Users group and Administrators if desired
           try {
-            if (-not (Get-LocalGroup -Name "Remote Desktop Users" -ErrorAction SilentlyContinue)) {
-              # normally exists, but be safe
-              New-LocalGroup -Name "Remote Desktop Users"
-            }
             Add-LocalGroupMember -Group "Remote Desktop Users" -Member $Username -ErrorAction SilentlyContinue
             Write-Host "✅ Added '$Username' to Remote Desktop Users group."
           } catch {
@@ -100,7 +91,6 @@ jobs:
             Write-Error "LOCLX_TOKEN is empty. Add it to repository secrets."
             exit 1
           }
-          # Use non-interactive login with token
           & .\loclx.exe account login --token $Env:LOCLX_TOKEN
           if ($LASTEXITCODE -ne 0) {
             Write-Error "loclx login failed with exit code $LASTEXITCODE"
@@ -112,20 +102,15 @@ jobs:
       - name: Start LocalXpose Tunnel (TCP 3389) and show public address
         shell: powershell
         run: |
-          # Create a (likely) unique subdomain to avoid collisions
           $rand = Get-Random -Minimum 1000 -Maximum 999999
           $sub = "myrdp$rand"
-
           Write-Host "🚀 Starting tunnel for RDP (TCP 3389) with subdomain: $sub ..."
 
-          # Start tunnel in background
           $arg = "tunnel tcp --to 3389 --subdomain $sub"
           $proc = Start-Process -FilePath ".\loclx.exe" -ArgumentList $arg -WindowStyle Hidden -PassThru
 
-          # wait for a bit and then try to fetch tunnel list
           Start-Sleep -Seconds 6
 
-          # Attempt up to a few times to get the public address
           $rdpUrl = $null
           for ($i=0; $i -lt 6 -and -not $rdpUrl; $i++) {
             Start-Sleep -Seconds (3 * $i + 1)
@@ -134,10 +119,8 @@ jobs:
             } catch {
               $output = $_.Exception.Message
             }
-            # Look for tcp:// lines or other patterns
             $line = $output | Where-Object { $_ -match "tcp://" -or ($_ -match "tcp" -and $_ -match "3389") } | Select-Object -First 1
             if ($line) {
-              # Try extract something like tcp://host:port or host:port
               if ($line -match "(tcp://\S+)") {
                 $rdpUrl = $Matches[1]
               } elseif ($line -match "(\S+:\d{1,5})") {
@@ -149,7 +132,6 @@ jobs:
           }
 
           if (-not $rdpUrl) {
-            # fallback: use the known pattern of subdomain + :3389
             $rdpUrl = "tcp://$sub.localxpose.io:3389"
             Write-Warning "Could not parse exact public address from 'loclx tunnel list'. Falling back to: $rdpUrl"
           }
