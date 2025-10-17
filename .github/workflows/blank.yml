@@ -1,4 +1,4 @@
-name: RDP_with_LocalXpose_Fixed
+name: RDP_with_LocalXpose_Fixed_With_Creds
 
 on:
   workflow_dispatch:
@@ -12,35 +12,150 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Enable RDP Access
+      - name: Prepare RDP user, enable RDP & firewall (generate password)
         shell: powershell
+        env:
+          # keep token only for later steps, not used here
+          LOCLX_TOKEN: ${{ secrets.LOCLX_TOKEN }}
         run: |
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
-          Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
-          Set-LocalUser -Name "runneradmin" -Password (ConvertTo-SecureString -AsPlainText "P@ssw0rd!" -Force)
-          Write-Host "✅ RDP enabled successfully."
+          # --- CONFIG ---
+          $Username = "runneradmin"
+
+          # Generate a robust random password (12 chars: letters, digits, symbols)
+          $chars = (@()
+            + (48..57)    # 0-9
+            + (65..90)    # A-Z
+            + (97..122)   # a-z
+            + (33..47)    # symbols
+            + (58..64)
+            + (91..96)
+          )
+          $pwChars = for ($i=0; $i -lt 12; $i++) { [char]($chars | Get-Random) }
+          $PlainPassword = ($pwChars -join "")
+          Write-Host "🔐 Generated password for local user (will be printed below):"
+
+          # Create or update local user with the generated password
+          try {
+            if (-not (Get-LocalUser -Name $Username -ErrorAction SilentlyContinue)) {
+              New-LocalUser -Name $Username -Password (ConvertTo-SecureString $PlainPassword -AsPlainText -Force) -PasswordNeverExpires $true -Description "RDP user for workflow"
+              Write-Host "✅ Local user '$Username' created."
+            } else {
+              Set-LocalUser -Name $Username -Password (ConvertTo-SecureString $PlainPassword -AsPlainText -Force)
+              Write-Host "🔁 Local user '$Username' already existed — password updated."
+            }
+          } catch {
+            Write-Error "Failed to create/update local user: $_"
+            exit 1
+          }
+
+          # Add user to Remote Desktop Users group and Administrators if desired
+          try {
+            if (-not (Get-LocalGroup -Name "Remote Desktop Users" -ErrorAction SilentlyContinue)) {
+              # normally exists, but be safe
+              New-LocalGroup -Name "Remote Desktop Users"
+            }
+            Add-LocalGroupMember -Group "Remote Desktop Users" -Member $Username -ErrorAction SilentlyContinue
+            Write-Host "✅ Added '$Username' to Remote Desktop Users group."
+          } catch {
+            Write-Warning "Could not add to Remote Desktop Users: $_"
+          }
+
+          # (Optional) Add to Administrators — comment out if you don't want admin rights
+          try {
+            Add-LocalGroupMember -Group "Administrators" -Member $Username -ErrorAction SilentlyContinue
+            Write-Host "⚠️ Added '$Username' to Administrators (optional)."
+          } catch {
+            Write-Warning "Could not add to Administrators: $_"
+          }
+
+          # Enable RDP and firewall rule
+          try {
+            Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
+            Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+            Write-Host "✅ RDP enabled and firewall configured."
+          } catch {
+            Write-Error "Failed to enable RDP or firewall: $_"
+            exit 1
+          }
+
+          # Print credentials (visible in Actions log)
+          Write-Host "----- RDP CREDENTIALS -----"
+          Write-Host "Username: $Username"
+          Write-Host "Password: $PlainPassword"
+          Write-Host "---------------------------"
 
       - name: Download LocalXpose CLI
         shell: powershell
         run: |
-          Invoke-WebRequest -Uri "https://api.localxpose.io/api/downloads/loclx-windows-amd64.zip" -OutFile "loclx.zip"
+          Invoke-WebRequest -Uri "https://api.localxpose.io/api/downloads/loclx-windows-amd64.zip" -OutFile "loclx.zip" -UseBasicParsing
           Expand-Archive -Path "loclx.zip" -DestinationPath "." -Force
           Write-Host "✅ LocalXpose (loclx.exe) extracted successfully."
 
       - name: Login to LocalXpose (non-interactive)
-        shell: cmd
+        shell: powershell
         env:
           LOCLX_TOKEN: ${{ secrets.LOCLX_TOKEN }}
         run: |
-          echo %LOCLX_TOKEN% | loclx.exe account login
-          loclx.exe account status
+          if (-not $Env:LOCLX_TOKEN -or $Env:LOCLX_TOKEN.Trim() -eq "") {
+            Write-Error "LOCLX_TOKEN is empty. Add it to repository secrets."
+            exit 1
+          }
+          # Use non-interactive login with token
+          & .\loclx.exe account login --token $Env:LOCLX_TOKEN
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "loclx login failed with exit code $LASTEXITCODE"
+            exit $LASTEXITCODE
+          }
+          Write-Host "✅ Logged in to LocalXpose."
+          & .\loclx.exe account status
 
-      - name: Start LocalXpose Tunnel (TCP 3389)
+      - name: Start LocalXpose Tunnel (TCP 3389) and show public address
         shell: powershell
         run: |
-          Write-Host "🚀 Starting tunnel for RDP (TCP 3389)..."
-          Start-Process -FilePath ".\loclx.exe" -ArgumentList "tunnel tcp --to 3389" -NoNewWindow
-          Write-Host "🌐 Tunnel started. You can view the public address in the next step."
+          # Create a (likely) unique subdomain to avoid collisions
+          $rand = Get-Random -Minimum 1000 -Maximum 999999
+          $sub = "myrdp$rand"
+
+          Write-Host "🚀 Starting tunnel for RDP (TCP 3389) with subdomain: $sub ..."
+
+          # Start tunnel in background
+          $arg = "tunnel tcp --to 3389 --subdomain $sub"
+          $proc = Start-Process -FilePath ".\loclx.exe" -ArgumentList $arg -WindowStyle Hidden -PassThru
+
+          # wait for a bit and then try to fetch tunnel list
+          Start-Sleep -Seconds 6
+
+          # Attempt up to a few times to get the public address
+          $rdpUrl = $null
+          for ($i=0; $i -lt 6 -and -not $rdpUrl; $i++) {
+            Start-Sleep -Seconds (3 * $i + 1)
+            try {
+              $output = & .\loclx.exe tunnel list 2>&1
+            } catch {
+              $output = $_.Exception.Message
+            }
+            # Look for tcp:// lines or other patterns
+            $line = $output | Where-Object { $_ -match "tcp://" -or ($_ -match "tcp" -and $_ -match "3389") } | Select-Object -First 1
+            if ($line) {
+              # Try extract something like tcp://host:port or host:port
+              if ($line -match "(tcp://\S+)") {
+                $rdpUrl = $Matches[1]
+              } elseif ($line -match "(\S+:\d{1,5})") {
+                $rdpUrl = $Matches[1]
+              } else {
+                $rdpUrl = $line.Trim()
+              }
+            }
+          }
+
+          if (-not $rdpUrl) {
+            # fallback: use the known pattern of subdomain + :3389
+            $rdpUrl = "tcp://$sub.localxpose.io:3389"
+            Write-Warning "Could not parse exact public address from 'loclx tunnel list'. Falling back to: $rdpUrl"
+          }
+
+          Write-Host "🌐 Public RDP address: $rdpUrl"
+          Write-Host "🔁 LocalXpose process id: $($proc.Id)"
 
       - name: Keep session alive
         shell: cmd
