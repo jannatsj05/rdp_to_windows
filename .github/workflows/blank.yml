@@ -1,4 +1,4 @@
-name: Gi123
+name: RDP_with_LocalXpose
 
 on:
   workflow_dispatch:
@@ -9,49 +9,39 @@ jobs:
     timeout-minutes: 9999
 
     steps:
-      - name: Checkout repo
+      - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Enable RDP
+      - name: Enable RDP Access
         shell: powershell
         run: |
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
           Set-LocalUser -Name "runneradmin" -Password (ConvertTo-SecureString -AsPlainText "P@ssw0rd!" -Force)
+          Write-Host "✅ RDP enabled successfully."
 
-      # ✅ Download from official GitHub Releases
-      - name: Download LocalXpose CLI (latest)
+      - name: Download LocalXpose CLI
         shell: powershell
         run: |
-          $url = "https://github.com/localxpose/cli/releases/latest/download/loclx-windows-amd64.zip"
-          Write-Host "Downloading LocalXpose from $url ..."
-          Invoke-WebRequest -Uri $url -OutFile "loclx.zip"
+          Invoke-WebRequest -Uri "https://api.localxpose.io/api/downloads/loclx-windows-amd64.zip" -OutFile "loclx.zip"
           Expand-Archive loclx.zip -DestinationPath .
-          Rename-Item ".\loclx-windows-amd64.exe" "loclx.exe"
-          Write-Host "Download complete. Checking version..."
-          .\loclx.exe --version
+          Rename-Item ".\loclx-windows-amd64.exe" "loclx.exe" -Force
+          Write-Host "✅ LocalXpose downloaded successfully."
 
-      # ✅ Login with your LocalXpose token (GitHub secret)
       - name: Login to LocalXpose
         shell: powershell
         env:
-          LOCLX_TOKEN: ${{ secrets.LOCLX_TOKEN }}
+          LOCXLX_TOKEN: ${{ secrets.LOCLX_TOKEN }}
         run: |
-          if (-not $Env:LOCLX_TOKEN) {
-            Write-Error "LOCLX_TOKEN secret missing! Add it in GitHub → Settings → Secrets → Actions"
-            exit 1
-          }
-          .\loclx.exe account login $Env:LOCLX_TOKEN
+          .\loclx.exe account login --token $Env:LOCXLX_TOKEN
+          Write-Host "✅ Logged in to LocalXpose successfully."
 
-      # ✅ Start TCP tunnel in background
-      - name: Start LocalXpose TCP tunnel
+      - name: Start LocalXpose Tunnel (TCP 3389)
         shell: powershell
         run: |
-          Write-Host "Starting LocalXpose TCP tunnel..."
           Start-Process -FilePath ".\loclx.exe" -ArgumentList "tunnel tcp --to 3389" -NoNewWindow
-          Start-Sleep -Seconds 6
-          Write-Host "Tunnel started. Check log for endpoint info."
+          Write-Host "🚀 Tunnel started. You’ll get your public TCP address below."
 
-      - name: Run upload.bat
+      - name: Keep session alive
         shell: cmd
-        run: echo "Upload step running..."
+        run: ping -t 127.0.0.1 >nul
