@@ -1,4 +1,4 @@
-name: RDP_with_LocalXpose_CLI_Fixed
+name: RDP_with_LocalXpose_AutoLogin
 
 on:
   workflow_dispatch:
@@ -22,38 +22,20 @@ jobs:
           $pwChars = for ($i=0; $i -lt 12; $i++) { [char]($chars | Get-Random) }
           $PlainPassword = -join $pwChars
 
-          Write-Host "Generated password for local user:"
-
           # Create/update user
-          try {
-              if (-not (Get-LocalUser -Name $Username -ErrorAction SilentlyContinue)) {
-                  New-LocalUser -Name $Username -Password (ConvertTo-SecureString $PlainPassword -AsPlainText -Force) -PasswordNeverExpires $true -Description "RDP user for workflow"
-                  Write-Host "Local user $Username created."
-              } else {
-                  Set-LocalUser -Name $Username -Password (ConvertTo-SecureString $PlainPassword -AsPlainText -Force)
-                  Write-Host "Local user $Username already existed - password updated."
-              }
-          } catch {
-              Write-Error "Failed to create/update local user: $_"
-              exit 1
+          if (-not (Get-LocalUser -Name $Username -ErrorAction SilentlyContinue)) {
+              New-LocalUser -Name $Username -Password (ConvertTo-SecureString $PlainPassword -AsPlainText -Force) -PasswordNeverExpires $true
+          } else {
+              Set-LocalUser -Name $Username -Password (ConvertTo-SecureString $PlainPassword -AsPlainText -Force)
           }
 
           # Add to groups
-          try {
-              Add-LocalGroupMember -Group "Remote Desktop Users" -Member $Username -ErrorAction SilentlyContinue
-              Add-LocalGroupMember -Group "Administrators" -Member $Username -ErrorAction SilentlyContinue
-          } catch {
-              Write-Warning "Could not add to groups: $_"
-          }
+          Add-LocalGroupMember -Group "Remote Desktop Users" -Member $Username -ErrorAction SilentlyContinue
+          Add-LocalGroupMember -Group "Administrators" -Member $Username -ErrorAction SilentlyContinue
 
           # Enable RDP and firewall
-          try {
-              Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" -Name "fDenyTSConnections" -Value 0
-              Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
-          } catch {
-              Write-Error "Failed to enable RDP or firewall: $_"
-              exit 1
-          }
+          Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" -Name "fDenyTSConnections" -Value 0
+          Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
 
           # Show credentials
           Write-Host "----- RDP CREDENTIALS -----"
@@ -66,24 +48,23 @@ jobs:
         run: |
           Invoke-WebRequest -Uri "https://api.localxpose.io/api/downloads/loclx-windows-amd64.zip" -OutFile "loclx.zip" -UseBasicParsing
           Expand-Archive -Path "loclx.zip" -DestinationPath "." -Force
-          Write-Host "LocalXpose extracted successfully."
 
-      - name: Login to LocalXpose (interactive / session)
+      - name: Ensure LocalXpose session
         shell: powershell
         run: |
-          Write-Host "Please ensure LocalXpose GUI login or previous session exists."
-          Write-Host "Skipping --token login because CLI no longer supports it."
+          # If GUI login done once manually, session stored in user profile
+          $sessionFile = "$env:USERPROFILE\.localxpose\session.json"
+          if (-not (Test-Path $sessionFile)) {
+              Write-Warning "No saved session found. Please login once manually via GUI to save session."
+          }
 
       - name: Start LocalXpose Tunnel (TCP 3389)
         shell: powershell
         run: |
           $rand = Get-Random -Minimum 1000 -Maximum 999999
           $sub = "myrdp$rand"
-          Write-Host "Starting tunnel for RDP (TCP 3389) with subdomain: $sub"
-
           $arg = "tunnel tcp --to 3389 --subdomain $sub"
           $proc = Start-Process -FilePath ".\loclx.exe" -ArgumentList $arg -WindowStyle Hidden -PassThru
-
           Start-Sleep -Seconds 6
 
           $rdpUrl = "tcp://$sub.localxpose.io:3389"
